@@ -1,6 +1,5 @@
 /*
  * GOXR3PLUS STUDIO
- * https://goxr3plus.com
  * Description: Identify and handle unused assets in a project
  */
 
@@ -8,6 +7,9 @@ const fs = require('fs').promises;
 const path = require('path');
 const readline = require('readline');
 const { parse } = require('@babel/parser');
+
+// Global parameter to control folder name console log
+const showFolderNames = false;
 
 /**
  * Recursively collect files with specified extensions in a directory
@@ -24,7 +26,10 @@ async function collectFiles(directory, fileExtensions, files = []) {
 		const stats = await fs.lstat(entryPath);
 
 		if (stats.isDirectory()) {
-			await collectFiles(entryPath, fileExtensions, files); // Recursively collect files in subdirectories
+			if (showFolderNames) {
+				console.log('Checking folder:', entryPath);
+			}
+			files = await collectFiles(entryPath, fileExtensions, files); // Recursively collect files in subdirectories
 		} else if (stats.isFile() && fileExtensions.includes(path.extname(entryPath))) {
 			files.push(entryPath); // Add the file path to the files array
 		}
@@ -34,14 +39,17 @@ async function collectFiles(directory, fileExtensions, files = []) {
 }
 
 /**
- * Analyze code and extract import/require statements
+ * Analyze code and extract import/require statements and asset references
  * @param {string} code - The code to analyze
- * @returns {string[]} - Array of import/require statements
+ * @param {string} srcFilePath - The file path of the analyzed code
+ * @returns {string[]} - Array of import/require statements and asset references
  */
-function analyzeCodebase(code) {
+function analyzeCodebase(code, srcFilePath) {
 	const importRegex = /import\s+.*?\s+from\s+['"](.*?)['"]/g;
 	const requireRegex = /require\s*\(['"](.*?)['"]\)/g;
+	const assetRegex = /(['"])(?:\\.|[^\\])*?\.(png|jpg|jpeg|gif)(['"])/g;
 	const imports = new Set();
+	const assets = new Set();
 
 	let match;
 	while ((match = importRegex.exec(code)) !== null) {
@@ -54,7 +62,13 @@ function analyzeCodebase(code) {
 		imports.add(importString);
 	}
 
-	return Array.from(imports);
+	while ((match = assetRegex.exec(code)) !== null) {
+		const assetString = match[0];
+		const assetPath = path.resolve(path.dirname(srcFilePath), assetString.slice(1, -1));
+		assets.add(assetPath);
+	}
+
+	return [...imports, ...assets];
 }
 
 /**
@@ -76,43 +90,61 @@ async function copyFile(source, destination) {
  * @param {string} projectDirectory - The project directory
  * @returns {Promise<void>} - Promise that resolves when the process is complete
  */
+/**
+ * Identify and handle unused assets
+ * @param {string} projectDirectory - The project directory
+ * @returns {Promise<void>} - Promise that resolves when the process is complete
+ */
 async function identifyUnusedAssets(projectDirectory) {
 	console.log(`Project Directory: ${projectDirectory}`);
 
 	console.log('Scanning project files...');
-	const srcFiles = await collectFiles(path.join(projectDirectory, 'src'), ['.js', '.jsx']);
-	const assetFiles = await collectFiles(path.join(projectDirectory, 'assets'), ['.png', '.jpg', '.jpeg', '.gif']);
-	const lottieFiles = await collectFiles(path.join(projectDirectory, 'assets', 'lottie'), ['.json']);
+	const srcFiles = await collectFiles(path.join(projectDirectory, 'src'), ['.js', '.jsx', '.tsx']);
+	const assetFolders = await collectFiles(path.join(projectDirectory, 'assets'), ['.png', '.jpg', '.jpeg', '.gif', '.json']);
 
 	const usedAssets = new Set();
+	const unusedAssets = [];
 
 	let progress = 0;
+	const totalFiles = srcFiles.length;
 	console.log('Analyzing code files...');
 	for (const srcFile of srcFiles) {
 		const code = await fs.readFile(srcFile, 'utf-8');
-		const imports = analyzeCodebase(code);
+		const references = analyzeCodebase(code, srcFile);
 
-		imports.forEach((importString) => {
-			const assetName = path.basename(importString);
-			usedAssets.add(assetName);
+		references.forEach((reference) => {
+			const assetPath = path.resolve(path.dirname(srcFile), reference);
+			usedAssets.add(assetPath);
 		});
 
 		progress++;
-		console.log(`Processed ${progress} of ${srcFiles.length} code files.`);
+		process.stdout.clearLine();
+		process.stdout.cursorTo(0);
+		process.stdout.write(`Processed ${progress} of ${totalFiles} code files.`);
 	}
 
-	console.log('Unused Assets:');
+	console.log('\nUnused Assets:');
 	const excludedFiles = ['adaptive-icon.png', 'icon.png', 'splash.png'];
-	const unusedAssets = assetFiles
-		.concat(lottieFiles)
-		.filter((assetFile) => !usedAssets.has(path.basename(assetFile)))
-		.filter((assetFile) => !excludedFiles.includes(path.basename(assetFile)));
+	unusedAssets.push(
+		...assetFolders
+			.filter((assetFile) => !usedAssets.has(assetFile))
+			.filter((assetFile) => !excludedFiles.includes(path.basename(assetFile)))
+	);
 	console.log(unusedAssets);
 
 	if (unusedAssets.length === 0) {
 		console.log('No unused assets found.');
 		return;
 	}
+
+	let totalSize = 0;
+	for (const assetFile of unusedAssets) {
+		const stats = await fs.lstat(assetFile);
+		totalSize += stats.size;
+	}
+	const totalSizeMB = totalSize / (1024 * 1024); // Convert bytes to megabytes
+
+	console.log(`Total size of unused files: ${totalSizeMB.toFixed(2)} MB`);
 
 	const rl = readline.createInterface({
 		input: process.stdin,
