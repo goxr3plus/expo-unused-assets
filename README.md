@@ -12,8 +12,17 @@ You need to have Node.js installed in your computer ( i tested with node 18.0.0)
 
 It scans the assets folder for images or lottie files that are not being ( imported or require('...') ) inside the .js files in the src folder . If it finds it asks you if you want to delete them .
 
-Example screenshot :
+--------
+
+Examples screenshots :
+
+> No unused assets found
+
+![image](https://github.com/goxr3plus/expo-unused-assets/assets/20374208/0a24b086-8513-4942-b3c5-12bd882b18d6)
+
+> Some unused assets found 
+
+![image](https://github.com/goxr3plus/expo-unused-assets/assets/20374208/7c42fb05-9c22-4756-a22c-4d4bb6466637)
 
 
 
-![image](https://github.com/goxr3plus/expo-unused-assets/assets/20374208/3b4f5e52-7a38-4e93-af53-09a69edbe6c2)
